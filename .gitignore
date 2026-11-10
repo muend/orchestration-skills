@@ -1,0 +1,12 @@
+# generated outputs from test runs
+*.png
+*.jpg
+*.webp
+out/
+# local briefs / scratch
+scratch/
+*.local.md
+# editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
