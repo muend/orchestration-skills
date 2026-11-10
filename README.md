@@ -2,9 +2,12 @@
 
 A skill set for **Claude Code** that turns one Claude session into an orchestrator over three model families:
 
-- **Claude sub-agents**: Opus, Sonnet and Haiku tiers, through the Agent tool.
+- **Claude sub-agents**: Fable (hardest roles), Opus, Sonnet and Haiku tiers, through the Agent tool.
 - **OpenAI Codex CLI**: the GPT-6.x family. This lane also handles **image generation**, which Claude can't do.
-- **Google Gemini**: Gemini 4 Argon and 3.8 Flash, through the Antigravity CLI `agy`.
+- **Google Gemini**: Gemini 4 Argon (deep research) and 3.8 Flash, through the Antigravity CLI `agy`.
+
+**Subscription models only.** Every lane runs on a signed-in account: Claude Code, ChatGPT Pro (Codex) and
+Google AI Pro (Antigravity). Nothing uses a pay-per-token API key.
 
 The main session plans, writes briefs, makes the hard calls and writes the final synthesis. Each piece of work goes to the cheapest lane that can carry it, or to the family that is best at it.
 
@@ -14,9 +17,11 @@ The main session plans, writes briefs, makes the hard calls and writes the final
 skills/
   orchestration/   routing policy: which lane gets what, brief style per lane, patterns, rules
   codex/           bridge to `codex exec` (modes: task, image, opinion, bulk, ask, review) + codex.ps1
+                   image-profiles.json: role presets for images (photoreal, illustration, icon, ui-asset, text-heavy)
   codex-image/     detailed art-direction brief template for image generation via gpt-6.1-sol
-  gemini/          bridge to Gemini via `agy` (modes: research, digest, opinion, ask, task, bulk) + gemini.ps1
+  gemini/          bridge to Gemini via `agy` (modes: deepresearch, research, digest, opinion, ask, task, bulk)
 agents/
+  apex-worker.md     Fable  – hardest roles: critical architecture, problems that failed on Opus, adjudication
   deep-worker.md     Opus   – multi-file implementation, real debugging, judgment-heavy work
   scoped-worker.md   Sonnet – scoped edits, pattern clones, templated changes
   researcher.md      Sonnet – read-only wide reading, returns conclusions with pointers
@@ -30,12 +35,14 @@ install.ps1        installs skills and agents into ~/.claude (copy, or -Link for
 | Work | Lane |
 |---|---|
 | Plan, hard judgment, integration, synthesis | main Claude session |
+| Hardest roles, adjudicating disagreements between model families | `apex-worker` (Fable) |
 | Medium-high implementation / debugging | `deep-worker` (Opus) |
 | Scoped edits, lookups | `scoped-worker` (Sonnet) |
 | Wide reading → conclusion | `researcher` (Sonnet) or Gemini `digest` |
 | Verify a delegate's claim | `verifier` (Sonnet) |
 | Bulk mechanical data work | `bulk-processor` (Haiku) or `gpt-6-luna` |
-| **Images: generate or edit** | `gpt-6.1-sol` via `codex-image` |
+| **Images: generate or edit** | `gpt-6.1-sol` via `codex-image`, plus a role profile |
+| **Deep research → cited report** | Gemini 4 Argon (`gemini -Mode deepresearch`) |
 | GPT-side execution | `gpt-6.1-sol` (`codex -Mode task`) |
 | Second opinion | `gpt-6-astra` (`codex -Mode opinion`) |
 | Current web facts with sources | Gemini `research` |
@@ -69,6 +76,8 @@ $codex  = "$HOME\.claude\skills\codex\scripts\codex.ps1"
 $gemini = "$HOME\.claude\skills\gemini\scripts\gemini.ps1"
 
 pwsh -File $codex  -Mode image   -PromptFile brief.md -Out assets\hero.png
+pwsh -File $codex  -Mode image   -ImageProfile icon -PromptFile icon.md -Out assets\icon.png   # transparent
+pwsh -File $gemini -Mode deepresearch -PromptFile question.md -Out research\report.md
 pwsh -File $codex  -Mode image   -Session <CODEX_THREAD_ID> -Prompt "Keep everything; change only: ..."
 pwsh -File $codex  -Mode task    -Cd C:\proj -Write -PromptFile steps.md
 pwsh -File $codex  -Mode opinion -PromptFile question.md
@@ -83,6 +92,10 @@ Each script ends with machine-readable lines:
 ## Notes and caveats
 
 - **Briefs sent to external lanes go to OpenAI or Google.** Keep secrets and private data out of them.
+- **Image model selection.** On the ChatGPT sign-in, Codex's built-in image tool only takes a prompt,
+  reference images and a transparent-background flag. The server picks the image model, so you can't
+  choose a specific one (e.g. GPT Image 2.6 Sunburst/Flare) without the paid API. Role profiles and the
+  brief are the levers instead.
 - **Images.** Codex saves the images it generates under `~/.codex/generated_images/<thread_id>/`. `codex.ps1` copies them from there to `-Out`. It checks that each file really is a PNG, JPEG or WebP, so an SVG drawn as a fallback is rejected.
 - **Sandboxes.** Lanes run read-only by default. File writes need `-Write` and are limited to `-Cd`. The scripts never use the "bypass all approvals" flags.
 - **Gemini research** can lag the live web. The lane is told to flag what it could not confirm, so cross-check anything decision-critical.

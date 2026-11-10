@@ -9,6 +9,28 @@ Claude writes the art direction; **gpt-6.1-sol** executes it literally with its 
 The brief is the whole quality ceiling: Sol will not invent missing details well, and it will not
 "use judgment" on open questions. Decide everything first, then write it down.
 
+## Engine and role profiles
+
+Images come from Codex's **built-in `image_gen` tool on the ChatGPT Pro sign-in — no API, no per-image
+fees.** That tool takes only a prompt, reference images and `transparent_background`; the server picks
+the image model, so specific models (GPT Image 2.6 Sunburst / Flare, etc.) **cannot be selected** here.
+Never switch to an API key or Codex's image CLI fallback.
+
+Role-specific control comes from **profiles** in `~/.claude/skills/codex/image-profiles.json`, passed with
+`-ImageProfile <name>`. A profile appends role style notes to the brief and can force transparency:
+
+| Profile | Use for | Notes |
+|---|---|---|
+| `default` | anything else | brief only |
+| `photoreal` | product shots, hero banners, editorial photos | photographic realism rules |
+| `illustration` | marketing/blog/onboarding art | cohesive illustration rules |
+| `icon` | app/UI icons, marks, stickers, sprites | **transparent**, padding, 32px legibility |
+| `ui-asset` | mockups, dashboard visuals, empty states | crisp geometry, no fake micro-text |
+| `text-heavy` | posters, covers, infographics | exact typography first |
+
+`-Transparent` works with any profile. Add new roles by adding an entry (`transparent`, `roles`,
+`style_notes`) to the JSON. The brief is still the main quality lever: profiles add, never replace it.
+
 ## Workflow
 
 1. **Clarify only what truly blocks you** (purpose, where it will be used, size/aspect, text on image,
@@ -18,7 +40,8 @@ The brief is the whole quality ceiling: Sol will not invent missing details well
 3. **Run:**
    ```
    pwsh -NoProfile -File "$HOME\.claude\skills\codex\scripts\codex.ps1" -Mode image `
-     -PromptFile <brief.md> -Out <project>\assets\<name>.png [-Count 3] [-Images ref1.png,ref2.png]
+     -PromptFile <brief.md> -Out <project>\assets\<name>.png [-ImageProfile icon] [-Transparent] `
+     [-Count 3] [-Images ref1.png,ref2.png]
    ```
    Use `timeout: 600000`. Several different images → one background run per image (a fleet).
 4. **Verify yourself:** Read each `CODEX_IMAGE=` file and check it against the acceptance checklist.

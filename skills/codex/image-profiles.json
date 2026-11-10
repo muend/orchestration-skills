@@ -1,0 +1,33 @@
+{
+  "_note": "All profiles use Codex's built-in image_gen tool through the ChatGPT account (no API fees). That tool has no model/quality/size parameter - the server picks the image model - so a profile is a role preset: style notes appended to the brief, plus transparency. Add your own roles here.",
+  "default": {
+    "transparent": false,
+    "roles": "Any image without a specific role preset.",
+    "style_notes": ""
+  },
+  "photoreal": {
+    "transparent": false,
+    "roles": "Product shots, hero banners, lifestyle and editorial photography.",
+    "style_notes": "Photorealistic, as shot on a full-frame camera: physically plausible light and shadows, real material textures, natural color grading, no illustrated or CGI look, no text unless the brief specifies it."
+  },
+  "illustration": {
+    "transparent": false,
+    "roles": "Blog/marketing illustrations, onboarding art, spot illustrations, storybook scenes.",
+    "style_notes": "Cohesive illustration style: consistent line weight, limited palette from the brief, clean shapes, readable silhouette, no photographic textures."
+  },
+  "icon": {
+    "transparent": true,
+    "roles": "App icons, UI icons, logos-as-marks, stickers, sprites.",
+    "style_notes": "Centered single subject with generous padding, flat or lightly shaded, max 3-4 colors, bold readable shape that still works at 32px, no text, transparent background."
+  },
+  "ui-asset": {
+    "transparent": false,
+    "roles": "App/web mockup art, dashboard hero visuals, device mockups, empty-state art.",
+    "style_notes": "Crisp, modern product-design aesthetic; precise geometry; any UI text short and spelled exactly as in the brief; avoid fake unreadable micro-text - leave text areas as clean blocks instead."
+  },
+  "text-heavy": {
+    "transparent": false,
+    "roles": "Posters, covers, infographics, slides-as-images where typography matters.",
+    "style_notes": "Typography is the priority: render every string exactly (spelling, case, diacritics), strong hierarchy, generous margins, no extra words, no lorem ipsum."
+  }
+}

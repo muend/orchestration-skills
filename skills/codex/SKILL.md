@@ -34,7 +34,13 @@ Check the live roster with `codex debug models` if a model is rejected (the acco
 
 Other options: `-Cd <dir>` working root · `-Images a.png,b.png` attach images · `-Out <file>` save final
 message (or image path in image mode) · `-Schema schema.json` force a JSON-shaped final answer ·
-`-Session <thread-id>` continue a previous conversation · `-Count N` image variants.
+`-Session <thread-id>` continue a previous conversation · `-Count N` image variants ·
+`-ImageProfile <role>` image role preset from `image-profiles.json` · `-Transparent` transparent background.
+
+**Subscription only.** Codex runs on the user's ChatGPT Pro sign-in. Never set or ask for `OPENAI_API_KEY`
+and never use Codex's image "CLI fallback" (it bills the API). On this path the built-in image tool has
+no model/quality/size parameter, so a specific image model (e.g. GPT Image 2.6 Sunburst/Flare) cannot be
+selected — say so if asked, and use role profiles + a precise brief instead.
 
 ## Output contract
 

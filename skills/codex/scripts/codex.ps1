@@ -31,6 +31,8 @@ param(
   [string]$Schema,                      # JSON Schema dosyası -> yapılandırılmış final cevap
   [string]$Session,                     # önceki thread id ile devam et
   [int]$Count = 1,                      # image: kaç varyant
+  [string]$ImageProfile = 'default',    # image: image-profiles.json içindeki rol profili
+  [switch]$Transparent,                 # image: şeffaf arka plan
   [switch]$Uncommitted,                 # review: commitlenmemiş değişiklikler
   [string]$Base,                        # review: bu branch'e göre
   [string]$Commit,                      # review: tek commit
@@ -49,6 +51,20 @@ if ($PromptFile) { $Prompt = Get-Content -Raw -Encoding utf8 $PromptFile }
 if (-not $Prompt -and $Mode -ne 'review') { Write-Error "-Prompt veya -PromptFile gerekli"; exit 2 }
 if (-not $Cd) { $Cd = (Get-Location).Path }
 $Cd = (Get-Item -LiteralPath (Resolve-Path $Cd).Path).FullName   # 8.3 kısa yolu (ör. USERNA~1) uzun yola çevir; sandbox kısa yolu reddediyor
+
+# --- image: rol profili ---------------------------------------------------------
+#   Sadece hesaba bağlı yol: Codex'in yerleşik image_gen aracı (ChatGPT girişi, API ücreti yok).
+#   Bu araçta model/kalite/boyut parametresi yok; profil = role özel stil notları + şeffaflık.
+if ($Mode -eq 'image') {
+  $profPath = Join-Path (Split-Path $PSScriptRoot) 'image-profiles.json'
+  $profiles = if (Test-Path $profPath) { Get-Content -Raw $profPath | ConvertFrom-Json -AsHashtable } else { @{} }
+  if (-not $profiles.ContainsKey($ImageProfile)) {
+    Write-Output "CODEX_ERROR=Bilinmeyen image profili '$ImageProfile'. Tanımlılar: $(($profiles.Keys | Where-Object { $_ -notlike '_*' }) -join ', ')"; Write-Output "CODEX_STATUS=error"; exit 1
+  }
+  $prof = $profiles[$ImageProfile]
+  if (-not $Transparent -and $prof.transparent) { $Transparent = [switch]$true }
+  if ($prof.style_notes -and -not $Session) { $Prompt = "$Prompt`n`n# Profile notes ($ImageProfile)`n$($prof.style_notes)" }
+}
 
 # --- mod başına varsayılan lane (orchestration politikası) -------------------
 #   execution/image -> gpt-6.1-sol (brief'i harfiyen uygular)
@@ -90,6 +106,7 @@ $Prompt
   }
   'image' {
     $n = if ($Count -gt 1) { "Generate exactly $Count separate images (variants), one tool call each." } else { "Generate exactly one image." }
+    if ($Transparent) { $n += " Call the tool with transparent_background=true and keep the subject cleanly isolated (no backdrop, no drop shadow unless the brief asks)." }
     $Prompt = @"
 You are an image-production subagent for another AI assistant (Claude), who wrote a detailed art-direction brief.
 Rules:

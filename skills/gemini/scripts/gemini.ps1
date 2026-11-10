@@ -14,7 +14,7 @@
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('ask', 'research', 'digest', 'opinion', 'task', 'bulk')]
+  [ValidateSet('ask', 'research', 'deepresearch', 'digest', 'opinion', 'task', 'bulk')]
   [string]$Mode = 'ask',
   [string]$Prompt,
   [string]$PromptFile,
@@ -40,7 +40,7 @@ $Cd = (Get-Item -LiteralPath (Resolve-Path $Cd).Path).FullName
 
 # --- mod başına varsayılan model (effort model adının içinde) ----------------
 $laneModel = @{
-  ask = 'gemini-4-argon-medium'; research = 'gemini-4-argon-high'; digest = 'gemini-4-argon-high'
+  ask = 'gemini-4-argon-medium'; research = 'gemini-4-argon-high'; deepresearch = 'gemini-4-argon-high'; digest = 'gemini-4-argon-high'
   opinion = 'gemini-4-argon-high'; task = 'gemini-4-argon-high'; bulk = 'gemini-3.8-flash-medium'
 }
 if (-not $Model) { $Model = $laneModel[$Mode] }
@@ -52,6 +52,26 @@ You are a research subagent for another AI assistant (Claude). Use your web sear
 Rules: cite a source URL for every factual claim; prefer primary sources; give dates for time-sensitive facts;
 separate verified facts from inference; say clearly when something could not be confirmed. Do not modify files.
 Reply: 1) direct answer, 2) evidence list with URLs, 3) gaps/uncertainties.
+"@ }
+  'deepresearch' { @"
+You are a DEEP RESEARCH subagent for another AI assistant (Claude). This is a multi-step investigation, not a quick lookup.
+Work in phases and do not skip any:
+1. PLAN: restate the research question, split it into 4-8 sub-questions, and note what evidence would settle each.
+2. SEARCH: for every sub-question run several searches with varied phrasings; open and read the primary sources
+   (official docs, papers, standards, filings, original announcements) rather than summaries. Aim for breadth first,
+   then depth on the sources that matter. Note publication dates.
+3. CROSS-CHECK: every key claim needs >= 2 independent sources, or is marked "single-source". Actively look for
+   contradicting evidence and newer information that supersedes older sources.
+4. SYNTHESIZE: answer the original question; resolve or explicitly present disagreements between sources.
+Rules: cite a URL (and date when known) for every factual claim; never invent sources or URLs; distinguish verified
+facts, single-source claims and your own inference; state what could not be confirmed. Do not modify files.
+Final report format (Markdown):
+# <title>
+## Executive summary (5-10 bullets, each with confidence: high/medium/low)
+## Findings by sub-question (each: answer, evidence with URLs, confidence)
+## Contradictions & open questions
+## Method (searches run, number of sources read, date of research)
+## Sources (numbered list: title - URL - date)
 "@ }
   'digest' { @"
 You are a large-context reading subagent for another AI assistant (Claude). Read the files/directories the brief points to
@@ -86,8 +106,16 @@ if ($full.Length -gt 20000) {
   $Include += (Split-Path $tmpLong)
 }
 
-$agyMode = if ($Mode -in 'task', 'bulk' -and $Write) { 'accept-edits' } else { 'plan' }
-$cmdArgs = @("-p=$full", '--output-format', 'json', '--mode', $agyMode, '--model', $Model, '--print-timeout', "${TimeoutSec}s")
+if ($Mode -eq 'deepresearch' -and -not $PSBoundParameters.ContainsKey('TimeoutSec')) { $TimeoutSec = 3600 }
+# Dikkat: agy'nin `--mode plan`'ı salt-okunur değil, "plan yap ve onay bekle" modudur (research'ü yarıda keser).
+# Okuma modlarında --mode verilmez; yazma yasağı prompt'ta. Yazma sadece task/bulk + -Write ile (accept-edits).
+$noStop = "`nIMPORTANT: Run ALL steps to completion in this single turn. Do not stop to ask for approval or review, do not create plan/artifact files, and do not write or modify any files - put everything in your final reply. Do NOT run terminal/shell commands (they are blocked in this headless run and will make you fail); use only your web search, URL-reading and file-reading tools."
+$cmdArgs = @('--output-format', 'json', '--model', $Model, '--print-timeout', "${TimeoutSec}s")
+if ($Mode -in 'task', 'bulk') {
+  $cmdArgs += @('--mode', ($Write ? 'accept-edits' : 'plan'))
+  if (-not $Write) { $full += "`nIMPORTANT: Read-only run. Do not modify files; report what you would change." }
+} else { $full += $noStop }
+$cmdArgs = @("-p=$full") + $cmdArgs
 if ($Session) { $cmdArgs += @('--conversation', $Session) }
 foreach ($d in $Include) { $cmdArgs += @('--add-dir', (Get-Item -LiteralPath (Resolve-Path $d).Path).FullName) }
 
@@ -98,16 +126,23 @@ try {
 } finally { Pop-Location; if ($tmp) { Remove-Item $tmp -ErrorAction SilentlyContinue } }
 
 $status = 'error'; $resp = ''; $sid = $null; $err = $null; $tok = $null
-$jsonStart = $raw.IndexOf('{"')
-if ($jsonStart -ge 0) {
-  try {
-    $j = $raw.Substring($jsonStart) | ConvertFrom-Json -ErrorAction Stop
-    $resp = $j.response
-    $sid  = $j.conversation_id
-    if ($j.usage) { $tok = "in:$($j.usage.input_tokens) out:$($j.usage.output_tokens) think:$($j.usage.thinking_tokens)" }
-    if ($j.status -eq 'SUCCESS' -and $exit -eq 0) { $status = 'ok' } else { $err = "status=$($j.status) $($j.error)" }
-  } catch { $err = "JSON çözülemedi: $($raw.Substring(0, [Math]::Min(500, $raw.Length)))" }
+# agy JSON'dan sonra düz metin uyarı satırları basabiliyor -> JSON satırını tek tek ara
+$j = $null; $extra = @()
+foreach ($line in ($raw -split "`n")) {
+  if (-not $j -and $line.TrimStart().StartsWith('{"')) { try { $j = $line | ConvertFrom-Json -ErrorAction Stop; continue } catch {} }
+  if ($line.Trim()) { $extra += $line.Trim() }
+}
+if ($j) {
+  $resp = $j.response
+  $sid  = $j.conversation_id
+  if ($j.usage) { $tok = "in:$($j.usage.input_tokens) out:$($j.usage.output_tokens) think:$($j.usage.thinking_tokens)" }
+  $denied = @($j.denied_actions | ForEach-Object { $_.display_name }) -join ', '
+  if ($j.status -eq 'SUCCESS' -and $resp) { $status = 'ok' }
+  elseif ($j.status -eq 'SUCCESS') { $err = "boş cevap" + $(if ($denied) { " (engellenen eylemler: $denied)" } else { '' }) }
+  else { $err = "status=$($j.status) $($j.error)" }
+  if ($status -eq 'ok' -and $denied) { Write-Output "GEMINI_WARNING=engellenen eylemler: $denied" }
 } else { $err = if ($raw) { $raw.Substring(0, [Math]::Min(500, $raw.Length)) } else { "boş çıktı (exit $exit)" } }
+if ($err -and $extra) { $err += " | " + (($extra | Select-Object -First 2) -join ' ') }
 
 if ($resp) { Write-Output $resp }
 if ($Out -and $resp) { Set-Content -Encoding utf8 -Path $Out -Value $resp }
