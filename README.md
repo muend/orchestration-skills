@@ -9,6 +9,8 @@ A skill set for **Claude Code** that turns one Claude session into an orchestrat
 **Subscription models only.** Every lane runs on a signed-in account: Claude Code, ChatGPT Pro (Codex) and
 Google AI Pro (Antigravity). Nothing uses a pay-per-token API key.
 
+**Who it's for:** Claude Code users on Windows who also have a ChatGPT Pro (Codex) and/or Google AI Pro (Antigravity) sign-in.
+
 The main session plans, writes briefs, makes the hard calls and writes the final synthesis. Each piece of work goes to the cheapest lane that can carry it, or to the family that is best at it.
 
 ## Contents
@@ -99,4 +101,9 @@ Each script ends with machine-readable lines:
 - **Images.** Codex saves the images it generates under `~/.codex/generated_images/<thread_id>/`. `codex.ps1` copies them from there to `-Out`. It checks that each file really is a PNG, JPEG or WebP, so an SVG drawn as a fallback is rejected.
 - **Sandboxes.** Lanes run read-only by default. File writes need `-Write` and are limited to `-Cd`. The scripts never use the "bypass all approvals" flags.
 - **Gemini research** can lag the live web. The lane is told to flag what it could not confirm, so cross-check anything decision-critical.
+- **Not measured.** Routing has not been benchmarked for speed, cost or quality.
 - **Credits.** The routing policy is adapted from a user-supplied "fable-orchestration" delegation policy and extended with Gemini lanes and named Claude agents.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
