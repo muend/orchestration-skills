@@ -10,7 +10,8 @@
   pwsh -File gemini.ps1 -Mode opinion  -PromptFile question.md
   pwsh -File gemini.ps1 -Mode task     -Cd C:\proj -Write -PromptFile brief.md
 
-  Çıktı sonunda:  GEMINI_SESSION_ID=<conversation id> · GEMINI_TOKENS=... · GEMINI_STATUS=ok|error
+  Çıktı sonunda:  GEMINI_SESSION_ID=<conversation id> · GEMINI_TOKENS=... · GEMINI_STATUS=ok|error|quota (exit 0|1|4)
+  Her çalıştırma ~/.claude/orchestration/ledger.jsonl defterine bir satır yazar. -Pack ile ortak kanıt paketi eklenir.
 #>
 [CmdletBinding()]
 param(
@@ -24,7 +25,9 @@ param(
   [string[]]$Include,             # ek klasörler (--add-dir)
   [string]$Out,                   # son cevabı dosyaya da yaz
   [string]$Session,               # önceki konuşmaya devam (--conversation <id>)
-  [int]$TimeoutSec = 1800
+  [int]$TimeoutSec = 1800,
+  [string[]]$Pack,                # kanıt paketi dosya(ları): brief'e eklenir (opinion/digest için ortak paket)
+  [string]$Lane                   # defterde görünecek kısa kol adı
 )
 
 $ErrorActionPreference = 'Stop'
@@ -93,6 +96,13 @@ You are a bulk data-processing subagent. Apply the rule set EXACTLY and mechanic
 Write outputs only where the brief says. Finish with counts processed / changed / unmatched.
 "@ }
 }
+if ($Pack) {
+  $packText = foreach ($pf in $Pack) { "### Pack file: $(Split-Path -Leaf $pf)`n" + (Get-Content -Raw -Encoding utf8 -LiteralPath $pf) }
+  $Prompt = "$Prompt`n`n===== EVIDENCE PACK =====`n$($packText -join "`n`n")`n===== END EVIDENCE PACK =====`nWork from this pack; read other files only where it is insufficient."
+}
+if ($Mode -in 'opinion', 'task', 'digest') {
+  $Prompt += "`n`nEnd your final answer with: ## Obstacles / not verified (what you could not check or confirm) and ## Assumptions."
+}
 $full = "$wrap`n`n===== BRIEF =====`n$Prompt`n===== END BRIEF ====="
 
 # agy stdin okumuyor -> prompt argüman olarak gider. Windows komut satırı ~32K sınırı için
@@ -119,6 +129,7 @@ $cmdArgs = @("-p=$full") + $cmdArgs
 if ($Session) { $cmdArgs += @('--conversation', $Session) }
 foreach ($d in $Include) { $cmdArgs += @('--add-dir', (Get-Item -LiteralPath (Resolve-Path $d).Path).FullName) }
 
+$start = Get-Date
 Push-Location $Cd
 try {
   $raw = (& $agy.Source @cmdArgs 2>&1 | ForEach-Object { "$_" }) -join "`n"
@@ -144,10 +155,23 @@ if ($j) {
 } else { $err = if ($raw) { $raw.Substring(0, [Math]::Min(500, $raw.Length)) } else { "boş çıktı (exit $exit)" } }
 if ($err -and $extra) { $err += " | " + (($extra | Select-Object -First 2) -join ' ') }
 
+# Antigravity kotası (Google AI Pro): 5 saatte bir yenilenir, haftalık tavanı var, model grupları ayrı sayılır.
+# Kota hatası ayrı durum olarak bildirilir ki orkestratör başka kola yönlendirsin. Ücretli kredi (AI Credit Overages) asla kullanılmaz.
+if ($status -ne 'ok' -and "$err" -match 'quota|rate.?limit|RESOURCE_EXHAUSTED|429|limit reached|exhausted') { $status = 'quota' }
+
 if ($resp) { Write-Output $resp }
 if ($Out -and $resp) { Set-Content -Encoding utf8 -Path $Out -Value $resp }
 if ($err) { Write-Output "GEMINI_ERROR=$err" }
 if ($tok) { Write-Output "GEMINI_TOKENS=$tok" }
 if ($sid) { Write-Output "GEMINI_SESSION_ID=$sid" }
+try {
+  $dir = Join-Path $HOME '.claude\orchestration'
+  if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+  $rec = [ordered]@{ ts = (Get-Date).ToString('o'); family = 'gemini'; lane = $Lane; mode = $Mode; model = $Model; status = $status
+    seconds = [int]((Get-Date) - $start).TotalSeconds; session = $sid; out = $Out
+    tokens_in = $j.usage.input_tokens; tokens_out = $j.usage.output_tokens; tokens_think = $j.usage.thinking_tokens }
+  Add-Content -Encoding utf8 -LiteralPath (Join-Path $dir 'ledger.jsonl') -Value ($rec | ConvertTo-Json -Compress)
+} catch { }
 Write-Output "GEMINI_STATUS=$status"
+if ($status -eq 'quota') { Write-Output "GEMINI_HINT=Antigravity kotası doldu; Claude researcher veya Sol koluna yönlendir, kota yenilenince -Session $sid ile sürdür"; exit 4 }
 if ($status -ne 'ok') { exit 1 }

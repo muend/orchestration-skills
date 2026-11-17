@@ -13,11 +13,17 @@
   Çıktının sonunda makinece okunur satırlar basılır:
     CODEX_THREAD_ID=<id>      (devam etmek için -Session ile kullan)
     CODEX_IMAGE=<path>        (image modunda, her görsel için bir satır)
-    CODEX_STATUS=ok|error
+    CODEX_LIMIT_BEFORE / CODEX_LIMIT_AFTER=5h:<%> week:<%>   (abonelik limiti, oturum günlüğünden)
+    CODEX_STATUS=ok|error|blocked|limit|dryrun   (exit 0 | 1 | 3 | 4 | 0)
+  Her çalıştırma ~/.claude/orchestration/ledger.jsonl defterine bir satır yazar.
+
+  Keşif -> yargı (limit ekonomisi):
+  pwsh -File codex.ps1 -Mode scout -Cd C:\proj -PromptFile sorular.md -Out pack.md
+  pwsh -File codex.ps1 -Mode judge -Cd C:\proj -PromptFile karar.md -Pack pack.md -Out karar-cevap.md
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('ask', 'opinion', 'image', 'task', 'bulk', 'review')]
+  [ValidateSet('ask', 'scout', 'judge', 'opinion', 'image', 'task', 'bulk', 'review')]
   [string]$Mode = 'ask',
   [string]$Prompt,
   [string]$PromptFile,
@@ -36,7 +42,14 @@ param(
   [switch]$Uncommitted,                 # review: commitlenmemiş değişiklikler
   [string]$Base,                        # review: bu branch'e göre
   [string]$Commit,                      # review: tek commit
-  [int]$TimeoutSec = 1800
+  [int]$TimeoutSec = 1800,
+  [string[]]$Pack,                      # kanıt paketi dosya(ları): brief'e "Evidence pack" olarak eklenir (judge'da zorunlu)
+  [int]$MaxExtraFiles = 6,              # judge: paket dışında açılabilecek en fazla dosya
+  [string]$EffortReason,                # xhigh için zorunlu gerekçe (deftere yazılır)
+  [switch]$UserApproved,                # max/ultra veya limit eşiği aşımı için kullanıcının açık onayı
+  [switch]$Force,                       # limit korumasını atla (yalnız kullanıcı isteyince)
+  [switch]$DryRun,                      # codex'i çağırmadan son prompt'u, argümanları ve koruma kararını göster
+  [string]$Lane                         # defterde görünecek kısa kol adı (ör. G1-guvenlik)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,6 +64,43 @@ if ($PromptFile) { $Prompt = Get-Content -Raw -Encoding utf8 $PromptFile }
 if (-not $Prompt -and $Mode -ne 'review') { Write-Error "-Prompt veya -PromptFile gerekli"; exit 2 }
 if (-not $Cd) { $Cd = (Get-Location).Path }
 $Cd = (Get-Item -LiteralPath (Resolve-Path $Cd).Path).FullName   # 8.3 kısa yolu (ör. USERNA~1) uzun yola çevir; sandbox kısa yolu reddediyor
+
+# --- yardımcılar: abonelik limiti ve maliyet defteri ------------------------
+#   Codex her oturum dosyasına (~/.codex/sessions/Y/M/D/rollout-*.jsonl) token_count olaylarıyla birlikte
+#   rate_limits yazar: primary = 5 saatlik pencere, secondary = haftalık pencere (used_percent).
+function Get-CodexLimit {
+  $root = Join-Path $HOME '.codex\sessions'
+  if (-not (Test-Path $root)) { return $null }
+  # Not: Windows açık tutulan dosyanın LastWriteTime'ını geç günceller; çalışan kolları kaçırmamak için
+  # bugünün ve dünün tüm oturumları taranır, en yeni olay zaman damgası kazanır.
+  $days = @((Get-Date), (Get-Date).AddDays(-1)) | ForEach-Object { Join-Path (Join-Path (Join-Path $root $_.ToString('yyyy')) $_.ToString('MM')) $_.ToString('dd') }
+  $files = @($days | Where-Object { Test-Path $_ } | ForEach-Object { Get-ChildItem $_ -Filter 'rollout-*.jsonl' -File })
+  if (-not $files.Count) { $files = Get-ChildItem $root -Recurse -Filter 'rollout-*.jsonl' -File | Sort-Object { $_.FullName } -Descending | Select-Object -First 3 }
+  $best = $null; $bestTs = [datetime]::MinValue
+  foreach ($f in $files) {
+    $tail = @(Get-Content -LiteralPath $f.FullName -Tail 400 -Encoding utf8 -ErrorAction SilentlyContinue)
+    for ($i = $tail.Count - 1; $i -ge 0; $i--) {
+      if ($tail[$i] -notlike '*"rate_limits"*') { continue }
+      try { $e = $tail[$i] | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+      $rl = $e.payload.rate_limits
+      if (-not ($rl -and $rl.primary)) { continue }   # bazı token_count satırlarında rate_limits null
+      $ts = [datetime]$e.timestamp   # ConvertFrom-Json ISO'yu DateTime'a çevirir; metin karşılaştırma yanlış olur
+      if ($ts -gt $bestTs) { $best = $rl; $bestTs = $ts }
+      break
+    }
+  }
+  if (-not $best) { return $null }
+  [pscustomobject]@{ FiveHour = [double]$best.primary.used_percent; Weekly = [double]$best.secondary.used_percent
+                     Plan = $best.plan_type; At = $bestTs.ToString('o') }
+}
+function Write-Ledger([hashtable]$rec) {
+  try {
+    $dir = Join-Path $HOME '.claude\orchestration'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+    $rec.ts = (Get-Date).ToString('o'); $rec.family = 'codex'
+    Add-Content -Encoding utf8 -LiteralPath (Join-Path $dir 'ledger.jsonl') -Value ($rec | ConvertTo-Json -Compress -Depth 4)
+  } catch { }
+}
 
 # --- image: rol profili ---------------------------------------------------------
 #   Sadece hesaba bağlı yol: Codex'in yerleşik image_gen aracı (ChatGPT girişi, API ücreti yok).
@@ -70,13 +120,55 @@ if ($Mode -eq 'image') {
 #   execution/image -> gpt-6.2-sol (brief'i harfiyen uygular)
 #   opinion         -> gpt-6.2-astra (peer / farklı açı)
 #   bulk            -> gpt-6-luna  (ucuz, mekanik toplu iş)
-$laneModel  = @{ ask = 'gpt-6.2-sol'; task = 'gpt-6.2-sol'; image = 'gpt-6.2-sol'; review = 'gpt-6.2-sol'; opinion = 'gpt-6.2-astra'; bulk = 'gpt-6-luna' }
-$laneEffort = @{ ask = 'medium'; task = 'medium'; image = 'high'; review = 'high'; opinion = 'high'; bulk = 'low' }
+#   scout           -> gpt-6.2-sol   (geniş okuma -> kanıt paketi; yargı yok)
+#   judge           -> gpt-6.2-astra (yalnız kanıt paketi üzerinden en zor yargı)
+$laneModel  = @{ ask = 'gpt-6.2-sol'; scout = 'gpt-6.2-sol'; judge = 'gpt-6.2-astra'; task = 'gpt-6.2-sol'; image = 'gpt-6.2-sol'; review = 'gpt-6.2-sol'; opinion = 'gpt-6.2-astra'; bulk = 'gpt-6-luna' }
+$laneEffort = @{ ask = 'medium'; scout = 'medium'; judge = 'high'; task = 'medium'; image = 'high'; review = 'high'; opinion = 'high'; bulk = 'low' }
 if (-not $Model)  { $Model  = $laneModel[$Mode] }
 if (-not $Effort) { $Effort = $laneEffort[$Mode] }
 
+# --- kanıt paketi -------------------------------------------------------------
+if ($Mode -eq 'judge' -and -not $Pack -and -not $Session) {
+  Write-Output "CODEX_ERROR=judge modu -Pack <kanıt paketi> ister (önce scout / researcher / gemini digest ile paket hazırla)"; Write-Output "CODEX_STATUS=error"; exit 2
+}
+if ($Pack -and -not $Session) {
+  $packText = foreach ($pf in $Pack) { "### Pack file: $(Split-Path -Leaf $pf)`n" + (Get-Content -Raw -Encoding utf8 -LiteralPath $pf) }
+  $Prompt = "$Prompt`n`n===== EVIDENCE PACK (prepared by a scout lane; path:line excerpts) =====`n$($packText -join "`n`n")`n===== END EVIDENCE PACK ====="
+}
+
+# Yargı/yürütme cevaplarının sonu: GPT-6.2 Astra bilinen engelleri daha sık atlıyor (system card) -> açık bölüm zorunlu.
+$footer = @"
+
+Before you finish, verify that your answer fully covers what was asked. End your final answer with two short sections:
+## Obstacles / not verified  (anything you could not check, run, open or confirm; tools or files that failed; "none" only if truly none)
+## Assumptions  (reversible assumptions you made to keep going)
+"@
+
 # --- prompt hazırlığı -------------------------------------------------------
 switch ($Mode) {
+  'scout' {
+    $Prompt = @"
+You are a scout lane for another AI assistant (Claude). Your only job is to collect evidence; a stronger model judges it later.
+Read what the brief points to and return an EVIDENCE PACK: for each question in the brief, the relevant facts as short
+verbatim excerpts with path:line (or URL), grouped by question. No recommendations, no verdicts.
+Keep the pack under ~8,000 words: prefer the decisive lines over whole files; note where more exists ("see path:120-180").
+Do not modify any files. End with "## Gaps" listing what you looked for and could not find.
+
+$Prompt
+"@
+  }
+  'judge' {
+    $Prompt = @"
+You are consulted as a senior peer by another AI assistant (Claude) for a hard, high-stakes judgment.
+Work from the evidence pack below. You may open at most $MaxExtraFiles additional files, only where the pack is insufficient for
+a specific point; name each file and why before opening it. Do not re-explore the repository broadly. Do not modify files.
+Disagree with the framing when the evidence says so. Give: verdict, the argument with pointers (path:line from the pack),
+risks, and what would change your mind.
+
+$Prompt
+$footer
+"@
+  }
   'opinion' {
     $Prompt = @"
 You are consulted as an independent peer reviewer by another AI assistant (Claude).
@@ -85,6 +177,7 @@ Structure: 1) your own read of the problem, 2) risks/blind spots, 3) alternative
 Do not modify any files.
 
 $Prompt
+$footer
 "@
   }
   'bulk' {
@@ -130,13 +223,16 @@ $Prompt
   }
   'task' {
     $Prompt = @"
-You are an execution subagent for another AI assistant (Claude). Complete the brief below in the working directory.
-Follow the numbered steps in order and run each step's acceptance check before moving on.
-Do exactly what the brief says: do not skip steps, do not add unrequested features, do not touch anything listed as out of scope.
-If a step cannot be completed as written, stop and report why instead of improvising.
-Final reply: 1) per-step status (done / failed + reason), 2) files changed/created, 3) commands run for verification and their result, 4) anything left unfinished.
+You are an execution subagent for another AI assistant (Claude), working like a colleague who knows this project.
+Complete the brief below in the working directory and keep going until it is done; do not stop to offer the work or ask
+about routine decisions. Make reasonable, reversible assumptions and state them. Stop only if you are concretely blocked or
+before anything destructive or irreversible. Stay inside the brief: no unrequested features, nothing listed as out of scope.
+Run the brief's acceptance checks; do not trust a tool's "Done" without checking the result.
+Final reply: 1) status per requirement (done / failed + reason), 2) files changed/created, 3) verification commands and results,
+4) anything left unfinished.
 
 $Prompt
+$footer
 "@
   }
 }
@@ -160,6 +256,29 @@ if ($Session) {
   if ($Prompt)      { $cmdArgs += '-' }
 } else {
   $cmdArgs = @('exec') + $common + $imgArgs + @('-s', $sandbox, '-C', $Cd, '-')
+}
+
+# --- korumalar: düşünme seviyesi ve abonelik limiti -------------------------
+#   Kullanıcı kuralı (2026-11-17): medium/high. xhigh yalnız gerekçeyle; max/ultra yalnız açık onayla.
+#   Limit ekonomisi: Astra limiti hızlı yer. 5 saatlik pencere %60+ iken Astra, %85+ iken her Codex kolu durur.
+$block = $null
+if ($Effort -eq 'xhigh' -and -not $EffortReason -and -not $UserApproved) { $block = "xhigh için -EffortReason '<neden gerekli>' ver (kural: medium/high)" }
+if ($Effort -in 'max', 'ultra' -and -not $UserApproved) { $block = "$Effort yalnız kullanıcının açık onayıyla (-UserApproved)" }
+$limBefore = Get-CodexLimit
+if (-not $block -and $limBefore -and -not $Force -and -not $UserApproved) {
+  if ($limBefore.FiveHour -ge 85 -or $limBefore.Weekly -ge 90) { $block = "limit eşiği: 5 saatlik %$($limBefore.FiveHour), haftalık %$($limBefore.Weekly); sıfırlanmayı bekle veya Claude/Gemini koluna yönlendir" }
+  elseif ($Model -like '*astra*' -and ($limBefore.FiveHour -ge 60 -or $limBefore.Weekly -ge 75)) { $block = "Astra limit eşiği: 5 saatlik %$($limBefore.FiveHour), haftalık %$($limBefore.Weekly); gpt-6.2-sol kullan veya sıfırlanmayı bekle" }
+}
+if ($limBefore) { Write-Output ("CODEX_LIMIT_BEFORE=5h:{0}% week:{1}% plan:{2}" -f $limBefore.FiveHour, $limBefore.Weekly, $limBefore.Plan) }
+if ($block) {
+  Write-Output "CODEX_BLOCKED=$block"; Write-Output "CODEX_STATUS=blocked"
+  Write-Ledger @{ lane = $Lane; mode = $Mode; model = $Model; effort = $Effort; status = 'blocked'; reason = $block }
+  exit 3
+}
+if ($DryRun) {
+  Write-Output "CODEX_DRYRUN=codex $($cmdArgs -join ' ')"
+  Write-Output "----- PROMPT ($($Prompt.Length) karakter) -----"; Write-Output $Prompt
+  Write-Output "CODEX_STATUS=dryrun"; exit 0
 }
 
 # --- çalıştır ----------------------------------------------------------------
@@ -216,8 +335,17 @@ if ($Mode -eq 'image' -and $threadId) {
   }
 }
 
+$errors = @($errors | Select-Object -Unique)
 foreach ($er in $errors) { Write-Output "CODEX_ERROR=$er" }
-if ($usage) { Write-Output ("CODEX_TOKENS=in:{0} out:{1}" -f $usage.input_tokens, $usage.output_tokens) }
+if ($errors -match 'usage limit|rate limit|429|limit reached') { $status = 'limit' }
+if ($usage) { Write-Output ("CODEX_TOKENS=in:{0} cached:{1} out:{2}" -f $usage.input_tokens, $usage.cached_input_tokens, $usage.output_tokens) }
+$limAfter = Get-CodexLimit
+if ($limAfter) { Write-Output ("CODEX_LIMIT_AFTER=5h:{0}% week:{1}%" -f $limAfter.FiveHour, $limAfter.Weekly) }
+Write-Ledger @{ lane = $Lane; mode = $Mode; model = $Model; effort = $Effort; effort_reason = $EffortReason; status = $status
+  seconds = [int]((Get-Date) - $start).TotalSeconds; thread = $threadId; out = $Out
+  tokens_in = $usage.input_tokens; tokens_cached = $usage.cached_input_tokens; tokens_out = $usage.output_tokens
+  limit5h_before = $limBefore.FiveHour; limit5h_after = $limAfter.FiveHour; week_before = $limBefore.Weekly; week_after = $limAfter.Weekly }
 if ($threadId) { Write-Output "CODEX_THREAD_ID=$threadId" }
 Write-Output "CODEX_STATUS=$status"
+if ($status -eq 'limit') { Write-Output "CODEX_HINT=limit doldu; sıfırlanınca -Session $threadId ile kaldığı yerden sürdür"; exit 4 }
 if ($status -ne 'ok') { exit 1 }

@@ -32,17 +32,32 @@ Runs take 10 s – several minutes (deep research up to ~60 min): `timeout: 6000
 `gemini-4-argon-high` is Argon's top level (effort is part of the model name; `agy --effort` conflicts
 with it). Override with `-Model` (`agy models`). `agy` also lists Claude and GPT-OSS models — don't route
 Claude work through it; use the Agent tool. Other options: `-Out <file>` · `-Session <GEMINI_SESSION_ID>` ·
-`-Include <dirs>` · `-TimeoutSec`.
+`-Include <dirs>` · `-TimeoutSec` · `-Pack a.md,b.md` (shared evidence pack, e.g. the same pack astra judges) ·
+`-Lane <name>` (ledger label).
 
 Implementation notes (already handled by the script): `agy --mode plan` is a "plan and wait for approval"
 mode, not read-only, so read-only modes run without `--mode` and are told not to write, not to stop for
 approval and not to run shell commands (headless runs auto-deny them). Prompts go as an argument (agy
 ignores stdin); briefs over ~20K chars are passed via a temp file.
 
+## Quota (Antigravity, Google AI Pro)
+
+Quota refreshes every 5 hours with a weekly cap; model groups (Gemini vs. Claude/GPT inside agy) are counted
+separately. `agy` sends a large system prompt with every request (measured 2026-11-17: ~14.5k input tokens for a one-word answer),
+so many small calls cost more than one well-scoped call: batch questions into one brief. There is no CLI readout of the remaining quota (see Antigravity's Models & Quota
+page). Never turn on or use purchased credits ("AI Credit Overages"). A quota error ends the run with
+`GEMINI_STATUS=quota` (exit 4): reroute per the orchestration fallback chain (researcher / Sol scout) and resume with
+`-Session` after the refresh. Every run is appended to `~/.claude/orchestration/ledger.jsonl` (family `gemini`).
+
+As a **scout** outside the Codex limit, `digest` is the preferred way to build an evidence pack for an Astra judge:
+ask for the pack format from the orchestration skill (§5) instead of a conclusion.
+
 ## Output contract
 
 Final answer text, then `GEMINI_WARNING=` (blocked actions, if any), `GEMINI_ERROR=` (if any),
-`GEMINI_TOKENS=`, `GEMINI_SESSION_ID=`, `GEMINI_STATUS=ok|error` (exit 1 on error or empty answer).
+`GEMINI_TOKENS=`, `GEMINI_SESSION_ID=`, `GEMINI_HINT=` (on quota), `GEMINI_STATUS=ok|error|quota`
+(exit 0 | 1 | 4; 1 also on an empty answer). `opinion`, `task` and `digest` answers end with
+`## Obstacles / not verified` and `## Assumptions`.
 
 ## Briefing
 
@@ -56,7 +71,7 @@ Final answer text, then `GEMINI_WARNING=` (blocked actions, if any), `GEMINI_ERR
 - **digest:** exact paths, the question, answer format, "file:line for every claim". Prefer this over
   reading dozens of files into Claude's own context.
 - **opinion:** same neutral peer brief you'd give gpt-6.2-astra (problem, evidence, options, uncertainty) —
-  never your conclusion to rubber-stamp. Run in parallel with astra for multi-model consensus.
+  never your conclusion to rubber-stamp. Run in parallel with astra for multi-model consensus, with the same `-Pack`.
 - **task/bulk:** same detailed step/acceptance or rule/example format as the codex skill.
 
 ## Rules

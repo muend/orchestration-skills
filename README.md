@@ -18,11 +18,14 @@ The main session plans, writes briefs, makes the hard calls and writes the final
 ```
 skills/
   orchestration/   routing policy: which lane gets what, brief style per lane, patterns, rules
-  codex/           bridge to `codex exec` (modes: task, image, opinion, bulk, ask, review) + codex.ps1
+  codex/           bridge to `codex exec` (modes: scout, judge, task, image, opinion, bulk, ask, review) + codex.ps1
+                   (effort + subscription-limit guards, evidence packs, cost ledger, -DryRun)
                    codex-watch.py: read-only live view of running lanes + 5-hour/weekly limit
                    image-profiles.json: role presets for images (photoreal, illustration, icon, ui-asset, text-heavy)
   codex-image/     detailed art-direction brief template for image generation via gpt-6.2-sol
   gemini/          bridge to Gemini via `agy` (modes: deepresearch, research, digest, opinion, ask, task, bulk)
+                   (shared evidence packs, quota status, cost ledger)
+  orchestration/scripts/ledger.py   cost per model/mode from ~/.claude/orchestration/ledger.jsonl
 agents/
   apex-worker.md     Fable  – hardest roles: critical architecture, problems that failed on Opus, adjudication
   deep-worker.md     Opus   – multi-file implementation, real debugging, judgment-heavy work
@@ -46,19 +49,30 @@ install.ps1        installs skills and agents into ~/.claude (copy, or -Link for
 | Bulk mechanical data work | `bulk-processor` (Haiku) or `gpt-6-luna` |
 | **Images: generate or edit** | `gpt-6.2-sol` via `codex-image`, plus a role profile |
 | **Deep research → cited report** | Gemini 4 Argon (`gemini -Mode deepresearch`) |
-| Hardest GPT-side work (security, architecture, strategy) | `gpt-6.2-astra`: strongest, but burns the limit fast; one lane at a time, judges an evidence pack |
-| GPT-side execution | `gpt-6.2-sol` (`codex -Mode task`): near-Astra coding at ~1/5 the cost |
+| Hardest GPT-side judgment (security, architecture, strategy) | scout → `gpt-6.2-astra` judge (`codex -Mode judge -Pack`): strongest, limit-expensive, one lane at a time |
+| GPT-side execution, scouting | `gpt-6.2-sol` (`codex -Mode task` / `scout`): near-Astra coding at ~1/5 the cost |
 | Second opinion | `gpt-6.2-astra` (`codex -Mode opinion`) |
 | Current web facts with sources | Gemini `research` |
 | Third opinion / multi-model consensus | Gemini `opinion` + astra in parallel |
 
-## GPT-6.2 and limit economy
+## Budgets, scout → judge and the ledger
 
-GPT-6.2 Astra and Sol (released 2026-11-17) are the defaults. Reasoning effort stays at `medium` or `high`; `xhigh` only
-when truly required. On a subscription sign-in the real budget is Codex's 5-hour and weekly limit, and most of it goes to
-re-sent context on every tool call, so wide repo exploration never runs on Astra: a scout (Claude `researcher`, Gemini
-`digest` or Sol) builds an evidence pack and Astra judges it. Check the limit with `python codex-watch.py --limit` before an
-Astra lane. Full rules: `skills/codex/SKILL.md` → "Limit economy".
+Every lane runs on a subscription, so the real constraint is three separate quotas: Claude Code, Codex (5-hour and
+weekly windows) and Antigravity (5-hour refresh, weekly cap). Measured on a Plus sign-in: three GPT-6.2 Astra lanes at
+`xhigh` plus one Sol lane took Codex's 5-hour window from 47 % to 99 % in about 20 minutes, ~90 % of it re-sent cached
+context. The skill set is built around that:
+
+- **Scout → judge.** Wide reading runs on the most plentiful budget (Claude `researcher`, Gemini `digest`, or
+  `codex -Mode scout` on Sol) and returns an *evidence pack* (path:line excerpts per question). The strongest model then
+  judges only the pack: `codex -Mode judge -Pack pack.md` (Astra). The same pack feeds Gemini for a comparable third opinion.
+- **Guards in the bridge.** Effort stays at `medium`/`high`; `xhigh` needs `-EffortReason`, `max`/`ultra` need
+  `-UserApproved`. Astra is refused at ≥ 60 % of the 5-hour window, every Codex lane at ≥ 85 % (`CODEX_STATUS=blocked`,
+  exit 3). A lane that hits the limit returns `limit`/`quota` (exit 4) and is resumed with `-Session` after the reset.
+- **Ledger.** Both bridges append one line per run to `~/.claude/orchestration/ledger.jsonl`;
+  `python skills/orchestration/scripts/ledger.py` shows cost per model and mode. `codex-watch.py` shows running lanes and
+  the live limit.
+- **Mandatory "Obstacles / not verified" ending** on judgment and execution answers (GPT-6.2 Astra's system card notes it
+  omits known obstacles more often).
 
 ## Requirements
 

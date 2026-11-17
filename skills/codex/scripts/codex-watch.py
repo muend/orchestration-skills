@@ -7,6 +7,9 @@ a = ap.parse_args()
 d = datetime.date.today()
 base = os.path.expanduser(f'~/.codex/sessions/{d:%Y/%m/%d}')
 files = sorted(glob.glob(os.path.join(base, 'rollout-*.jsonl')))
+if a.limit:
+    y = d - datetime.timedelta(days=1)
+    files = sorted(glob.glob(os.path.expanduser(f'~/.codex/sessions/{y:%Y/%m/%d}/rollout-*.jsonl'))) + files
 if a.limit and not files:
     prev = sorted(glob.glob(os.path.expanduser('~/.codex/sessions/*/*/*/rollout-*.jsonl')))
     files = prev[-1:]
@@ -17,9 +20,10 @@ for f in files:
     for line in open(f, encoding='utf-8'):
         try: L.append(json.loads(line))
         except Exception: pass
-    model = cwd = eff = ''; tok = cached = outk = 0; steps = []; done = False; first = ''
+    model = cwd = eff = ''; tok = cached = outk = 0; steps = []; done = False; first = ''; last_ts = ''
     for x in L:
         t, p = x.get('type'), x.get('payload') or {}
+        last_ts = x.get('timestamp', last_ts) or last_ts
         if t == 'turn_context': model, cwd, eff = p.get('model', ''), p.get('cwd', ''), p.get('effort') or p.get('reasoning_effort') or ''
         if t == 'event_msg' and p.get('type') == 'token_count':
             info = p.get('info') or {}; tu = info.get('total_token_usage') or {}; tok = tu.get('total_tokens', tok)
@@ -41,7 +45,9 @@ for f in files:
                 txt = ' '.join(c.get('text', '') for c in p.get('content', []))
                 if '# Görev' in txt or not first: first = txt
     title = next((l for l in first.splitlines() if l.startswith('# Görev') or l.startswith('# Task')), first.splitlines()[0][:60] if first else '?')
-    age = int((datetime.datetime.now() - datetime.datetime.fromtimestamp(os.path.getmtime(f))).total_seconds())
+    # dosya mtime'ı Windows'ta açık dosyada geç güncellenir -> son olayın kendi zaman damgası kullanılır
+    try: age = int((datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(last_ts.replace('Z', '+00:00'))).total_seconds())
+    except Exception: age = int((datetime.datetime.now() - datetime.datetime.fromtimestamp(os.path.getmtime(f))).total_seconds())
     state = 'BİTTİ' if done else ('çalışıyor' if age < 900 else 'durmuş/kesilmiş')
     if a.limit: continue
     print(f"\n=== {title.strip()} | {model} {eff} | {state} | {tok:,} token (önbellek {cached:,}, çıktı {outk:,}) | son etkinlik {age}s önce")

@@ -16,3 +16,8 @@ Rules:
 
 Report: direct answer first (a few lines), then supporting evidence as a short list of pointers, then
 open questions or gaps.
+
+When the brief asks for an **evidence pack** (input for a judge lane such as GPT-6.2 Astra), return no verdict. Use:
+`# Evidence pack: <decision>` → `## Q1 <question>` with bullets `path:line-range — "<verbatim decisive lines>" (why it
+matters)` or `URL (date) — "<quote>"` → ... → `## Gaps` (what you looked for and did not find). Keep it under ~8,000
+words; prefer decisive lines over whole files. Never copy secrets or credential values into a pack.
