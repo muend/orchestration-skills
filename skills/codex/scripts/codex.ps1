@@ -21,8 +21,8 @@ param(
   [string]$Mode = 'ask',
   [string]$Prompt,
   [string]$PromptFile,
-  [string]$Model,                       # örn. gpt-6.1-sol | gpt-6.1-terra | gpt-6-luna | gpt-6-astra ; boşsa config varsayılanı
-  [ValidateSet('', 'low', 'medium', 'high', 'xhigh')]
+  [string]$Model,                       # örn. gpt-6.2-sol | gpt-6.2-astra | gpt-6.1-terra | gpt-6-luna (6.2-luna/terra yok) ; boşsa config varsayılanı
+  [ValidateSet('', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')]  # kullanıcı kuralı: medium/high; xhigh+ yalnız zorunluysa
   [string]$Effort = '',
   [string]$Cd,                          # çalışma klasörü (task/review); boşsa geçerli klasör
   [switch]$Write,                       # task modunda dosya yazmaya izin ver (workspace-write)
@@ -67,11 +67,11 @@ if ($Mode -eq 'image') {
 }
 
 # --- mod başına varsayılan lane (orchestration politikası) -------------------
-#   execution/image -> gpt-6.1-sol (brief'i harfiyen uygular)
-#   opinion         -> gpt-6-astra (peer / farklı açı)
+#   execution/image -> gpt-6.2-sol (brief'i harfiyen uygular)
+#   opinion         -> gpt-6.2-astra (peer / farklı açı)
 #   bulk            -> gpt-6-luna  (ucuz, mekanik toplu iş)
-$laneModel  = @{ ask = 'gpt-6.1-sol'; task = 'gpt-6.1-sol'; image = 'gpt-6.1-sol'; review = 'gpt-6.1-sol'; opinion = 'gpt-6-astra'; bulk = 'gpt-6-luna' }
-$laneEffort = @{ ask = 'medium'; task = 'high'; image = 'high'; review = 'high'; opinion = 'high'; bulk = 'low' }
+$laneModel  = @{ ask = 'gpt-6.2-sol'; task = 'gpt-6.2-sol'; image = 'gpt-6.2-sol'; review = 'gpt-6.2-sol'; opinion = 'gpt-6.2-astra'; bulk = 'gpt-6-luna' }
+$laneEffort = @{ ask = 'medium'; task = 'medium'; image = 'high'; review = 'high'; opinion = 'high'; bulk = 'low' }
 if (-not $Model)  { $Model  = $laneModel[$Mode] }
 if (-not $Effort) { $Effort = $laneEffort[$Mode] }
 

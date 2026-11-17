@@ -55,7 +55,7 @@ Final answer text, then `GEMINI_WARNING=` (blocked actions, if any), `GEMINI_ERR
   lag the live web; it is told to flag what it could not confirm — pass those gaps on.
 - **digest:** exact paths, the question, answer format, "file:line for every claim". Prefer this over
   reading dozens of files into Claude's own context.
-- **opinion:** same neutral peer brief you'd give gpt-6-astra (problem, evidence, options, uncertainty) —
+- **opinion:** same neutral peer brief you'd give gpt-6.2-astra (problem, evidence, options, uncertainty) —
   never your conclusion to rubber-stamp. Run in parallel with astra for multi-model consensus.
 - **task/bulk:** same detailed step/acceptance or rule/example format as the codex skill.
 

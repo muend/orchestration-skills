@@ -1,17 +1,17 @@
 ---
 name: codex-image
-description: "Generate or edit raster images (illustrations, photos, icons, logos, mockups, posters, UI art, textures, sprites, product shots, diagrams-as-art) by delegating to Codex's image generation tool via gpt-6.1-sol. Claude cannot generate images itself, so load this whenever the user asks to create, draw, render, generate, redesign, retouch or vary an image, or a project needs image assets. Teaches the detailed art-direction brief Codex follows literally, the edit/iteration loop, and verification. Uses the codex skill's script."
+description: "Generate or edit raster images (illustrations, photos, icons, logos, mockups, posters, UI art, textures, sprites, product shots, diagrams-as-art) by delegating to Codex's image generation tool via gpt-6.2-sol. Claude cannot generate images itself, so load this whenever the user asks to create, draw, render, generate, redesign, retouch or vary an image, or a project needs image assets. Teaches the detailed art-direction brief Codex follows literally, the edit/iteration loop, and verification. Uses the codex skill's script."
 ---
 
 # Image generation through Codex
 
-Claude writes the art direction; **gpt-6.1-sol** executes it literally with its built-in image tool.
+Claude writes the art direction; **gpt-6.2-sol** executes it literally with its built-in image tool.
 The brief is the whole quality ceiling: Sol will not invent missing details well, and it will not
 "use judgment" on open questions. Decide everything first, then write it down.
 
 ## Engine and role profiles
 
-Images come from Codex's **built-in `image_gen` tool on the ChatGPT Pro sign-in — no API, no per-image
+Images come from Codex's **built-in `image_gen` tool on the ChatGPT subscription sign-in — no API, no per-image
 fees.** That tool takes only a prompt, reference images and `transparent_background`; the server picks
 the image model, so specific models (GPT Image 2.6 Sunburst / Flare, etc.) **cannot be selected** here.
 Never switch to an API key or Codex's image CLI fallback.

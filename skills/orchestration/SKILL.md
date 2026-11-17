@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: "Full multi-model orchestration policy: the main Claude session plans, writes briefs, makes hard calls and synthesizes; work is routed by difficulty and capability to Claude sub-agents (apex-worker/Fable for the hardest roles, deep-worker/Opus, scoped-worker/Sonnet, researcher/Sonnet, bulk-processor/Haiku, verifier/Sonnet via the Agent tool), Codex GPT lanes (gpt-6.1-sol execution and ALL image generation with role profiles, gpt-6-astra second opinions, gpt-6-luna bulk) and Gemini lanes via Antigravity agy (Gemini 4 Argon deep research and web research with sources, huge-context digests, third opinions). Only subscription-bound models are used, never paid API keys. Load for any task with several separable parts, anything needing images, deep research, a second/third opinion, wide reading, bulk data work, parallel fleets, or when the user asks to involve other models."
+description: "Full multi-model orchestration policy: the main Claude session plans, writes briefs, makes hard calls and synthesizes; work is routed by difficulty and capability to Claude sub-agents (apex-worker/Fable for the hardest roles, deep-worker/Opus, scoped-worker/Sonnet, researcher/Sonnet, bulk-processor/Haiku, verifier/Sonnet via the Agent tool), Codex GPT lanes (gpt-6.2-sol execution and ALL image generation with role profiles, gpt-6.2-astra second opinions, gpt-6-luna bulk) and Gemini lanes via Antigravity agy (Gemini 4 Argon deep research and web research with sources, huge-context digests, third opinions). Only subscription-bound models are used, never paid API keys. Load for any task with several separable parts, anything needing images, deep research, a second/third opinion, wide reading, bulk data work, parallel fleets, or when the user asks to involve other models."
 ---
 
 # Orchestration — Claude + Codex (GPT) + Gemini
@@ -29,14 +29,15 @@ it — and to the model family that is actually best at it.
 | Wide reading of code/docs/logs/web → conclusion only | **researcher** (Sonnet) | `Agent(subagent_type: "researcher")` | Question, where to look, answer shape |
 | Check that a delegate's "done" is true | **verifier** (Sonnet) | `Agent(subagent_type: "verifier")` | Acceptance criteria + the delegate's report |
 | Mechanical bulk: normalize, dedupe, classify, extract | **bulk-processor** (Haiku) or **gpt-6-luna** | Agent / `codex -Mode bulk` | Exact rules + examples, small batches |
-| **Image generation / editing** (Claude can't) | **gpt-6.1-sol** + role profile (`-ImageProfile photoreal / illustration / icon / ui-asset / text-heavy`) | `codex-image` skill | Full art-direction brief |
+| **Image generation / editing** (Claude can't) | **gpt-6.2-sol** + role profile (`-ImageProfile photoreal / illustration / icon / ui-asset / text-heavy`) | `codex-image` skill | Full art-direction brief |
 | **Deep research:** multi-source investigation, literature/market/technology surveys, a report with citations | **Gemini 4 Argon** | `gemini -Mode deepresearch -Out report.md` | Research question, scope, sub-topics, recency, report length |
-| GPT-side execution (user asks, or a different family wanted) | **gpt-6.1-sol** | `codex -Mode task` | Detailed numbered steps, nothing implicit |
-| Second opinion / out-of-the-box angle on a hard call | **gpt-6-astra** | `codex -Mode opinion` | Peer question + evidence |
+| **Hardest GPT-side work:** security audits, architecture-critical calls, strategy, hard engineering specs, anything where GPT's top reasoning matters | **gpt-6.2-astra** (strongest, smartest GPT model) | `codex -Mode task -Model gpt-6.2-astra` or `-Mode opinion` | Senior-peer brief: problem, all evidence, what the answer must cover |
+| GPT-side routine/medium execution (user asks, or a different family wanted) | **gpt-6.2-sol** (strong but more efficient) | `codex -Mode task` | Detailed numbered steps, nothing implicit |
+| Second opinion / out-of-the-box angle on a hard call | **gpt-6.2-astra** | `codex -Mode opinion` | Peer question + evidence |
 | **Current facts from the web** (versions, prices, news, docs released recently) | **Gemini** | `gemini -Mode research` | Question + what counts as a source |
 | **Huge-context digest** (whole repo, many long docs) | **Gemini** | `gemini -Mode digest` | Paths + exact question + answer shape |
 | Third opinion when sol/astra and Claude disagree, or high stakes | **Gemini** | `gemini -Mode opinion` | Same peer brief as astra |
-| Codex review of a git diff | **gpt-6.1-sol** | `codex -Mode review` | `-Uncommitted` / `-Base` / `-Commit` |
+| Codex review of a git diff | **gpt-6.2-sol** | `codex -Mode review` | `-Uncommitted` / `-Base` / `-Commit` |
 
 The named agents live in `~/.claude/agents/*.md` and load at session start. If one is reported "not
 found" (e.g. created mid-session), fall back to `Agent(subagent_type: "general-purpose", model: "<tier>")`
@@ -49,7 +50,7 @@ and silently fans out the most expensive tier.
 
 ## 3. Hard rules
 
-0. **Subscription models only — never paid API.** Codex runs on the user's ChatGPT Pro sign-in, Gemini on
+0. **Subscription models only — never paid API.** Codex runs on the user's ChatGPT subscription sign-in (Plus or Pro), Gemini on
    the Antigravity (Google AI Pro) sign-in, Claude sub-agents on Claude Code. Never ask for or use
    `OPENAI_API_KEY`, `GEMINI_API_KEY` or any pay-per-token key, and never switch to an API fallback (e.g.
    Codex's image CLI fallback). If a capability needs a paid API (e.g. picking a specific image model such
@@ -57,6 +58,10 @@ and silently fans out the most expensive tier.
 1. **Route by difficulty, then pick the cheapest capable tier.** Unsure → take the cheaper one, verify,
    escalate one tier on failure. **Fable is not a default tier**: use apex-worker only for the roles in its
    row, or after a failed verification on Opus; never for fan-out.
+1c. **Codex limit economy:** Astra burns the subscription limit fast. Default to Sol; never run wide repo exploration on
+   Astra (scout → judge: Claude researcher / Gemini digest / Sol medium builds an evidence pack, Astra judges it); one Astra lane
+   at a time; check `codex-watch.py --limit` first. Details in the `codex` skill, "Limit economy".
+1b. **GPT tier rule (user, 2026-11-17):** gpt-6.2-astra is the strongest and smartest GPT model — give it the hardest and highest-stakes GPT lanes. gpt-6.2-sol is strong but more efficient — give it well-specified execution, images, reviews and medium work. Escalate sol → astra on a failed verification.
 2. **Claude tiers are the default for text and code.** External lanes are used when the user asks, or for
    their standing specialties: images → sol; second opinion → astra; **deep research → Gemini 4 Argon**;
    live web facts / huge context / third opinion → Gemini; bulk → luna or Haiku.
@@ -85,7 +90,7 @@ and silently fans out the most expensive tier.
   "cite path:line or URL for every claim".
 - **verifier — criteria-shaped.** The original acceptance criteria verbatim + the delegate's report + where
   the artifacts are.
-- **gpt-6.1-sol — detailed, complete.** Numbered steps with exact paths/commands, acceptance check per step,
+- **gpt-6.2-sol — detailed, complete.** Numbered steps with exact paths/commands, acceptance check per step,
   edge cases with handling, explicit out-of-scope list. Anything unsaid will not happen; decide design
   questions first. (Template in `codex`; images in `codex-image`.)
 - **astra / Gemini opinion — peer question.** Problem, evidence, options you see, where you're unsure; ask
@@ -130,7 +135,10 @@ verification, not pre-emptively. If two different families fail the same way, st
 ## 6. External lane settings
 
 - Codex: `pwsh -NoProfile -File "$HOME\.claude\skills\codex\scripts\codex.ps1" -Mode <mode> -PromptFile <f>`
-  — effort `medium` routine, `high` precision/images (default), `xhigh` only for an explicitly heavy lane.
+  — effort: **user rule (2026-11-17): `medium` or `high`.** `medium` routine/well-scoped, `high` hard work and images;
+  `xhigh` only when truly required (say why in the spec); `max`/`ultra` only with the user's explicit OK. Fix the brief, not the
+  effort, when context is missing. Watch running lanes with `codex/scripts/codex-watch.py` (read-only). GPT-6.2 facts and
+  OpenAI's brief rules live in the `codex` skill.
   Images: `-Mode image -ImageProfile <role>` (profiles in `codex/image-profiles.json`; built-in tool only —
   the image model itself can't be chosen on the ChatGPT sign-in).
 - Gemini (via Antigravity `agy`; Gemini 4 Argon / 3.8 Flash; deep research defaults to argon-high, 60 min):

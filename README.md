@@ -6,10 +6,10 @@ A skill set for **Claude Code** that turns one Claude session into an orchestrat
 - **OpenAI Codex CLI**: the GPT-6.x family. This lane also handles **image generation**, which Claude can't do.
 - **Google Gemini**: Gemini 4 Argon (deep research) and 3.8 Flash, through the Antigravity CLI `agy`.
 
-**Subscription models only.** Every lane runs on a signed-in account: Claude Code, ChatGPT Pro (Codex) and
+**Subscription models only.** Every lane runs on a signed-in account: Claude Code, ChatGPT Plus/Pro (Codex) and
 Google AI Pro (Antigravity). Nothing uses a pay-per-token API key.
 
-**Who it's for:** Claude Code users on Windows who also have a ChatGPT Pro (Codex) and/or Google AI Pro (Antigravity) sign-in.
+**Who it's for:** Claude Code users on Windows who also have a ChatGPT Plus/Pro (Codex) and/or Google AI Pro (Antigravity) sign-in.
 
 The main session plans, writes briefs, makes the hard calls and writes the final synthesis. Each piece of work goes to the cheapest lane that can carry it, or to the family that is best at it.
 
@@ -19,8 +19,9 @@ The main session plans, writes briefs, makes the hard calls and writes the final
 skills/
   orchestration/   routing policy: which lane gets what, brief style per lane, patterns, rules
   codex/           bridge to `codex exec` (modes: task, image, opinion, bulk, ask, review) + codex.ps1
+                   codex-watch.py: read-only live view of running lanes + 5-hour/weekly limit
                    image-profiles.json: role presets for images (photoreal, illustration, icon, ui-asset, text-heavy)
-  codex-image/     detailed art-direction brief template for image generation via gpt-6.1-sol
+  codex-image/     detailed art-direction brief template for image generation via gpt-6.2-sol
   gemini/          bridge to Gemini via `agy` (modes: deepresearch, research, digest, opinion, ask, task, bulk)
 agents/
   apex-worker.md     Fable  – hardest roles: critical architecture, problems that failed on Opus, adjudication
@@ -43,12 +44,21 @@ install.ps1        installs skills and agents into ~/.claude (copy, or -Link for
 | Wide reading → conclusion | `researcher` (Sonnet) or Gemini `digest` |
 | Verify a delegate's claim | `verifier` (Sonnet) |
 | Bulk mechanical data work | `bulk-processor` (Haiku) or `gpt-6-luna` |
-| **Images: generate or edit** | `gpt-6.1-sol` via `codex-image`, plus a role profile |
+| **Images: generate or edit** | `gpt-6.2-sol` via `codex-image`, plus a role profile |
 | **Deep research → cited report** | Gemini 4 Argon (`gemini -Mode deepresearch`) |
-| GPT-side execution | `gpt-6.1-sol` (`codex -Mode task`) |
-| Second opinion | `gpt-6-astra` (`codex -Mode opinion`) |
+| Hardest GPT-side work (security, architecture, strategy) | `gpt-6.2-astra`: strongest, but burns the limit fast; one lane at a time, judges an evidence pack |
+| GPT-side execution | `gpt-6.2-sol` (`codex -Mode task`): near-Astra coding at ~1/5 the cost |
+| Second opinion | `gpt-6.2-astra` (`codex -Mode opinion`) |
 | Current web facts with sources | Gemini `research` |
 | Third opinion / multi-model consensus | Gemini `opinion` + astra in parallel |
+
+## GPT-6.2 and limit economy
+
+GPT-6.2 Astra and Sol (released 2026-11-17) are the defaults. Reasoning effort stays at `medium` or `high`; `xhigh` only
+when truly required. On a subscription sign-in the real budget is Codex's 5-hour and weekly limit, and most of it goes to
+re-sent context on every tool call, so wide repo exploration never runs on Astra: a scout (Claude `researcher`, Gemini
+`digest` or Sol) builds an evidence pack and Astra judges it. Check the limit with `python codex-watch.py --limit` before an
+Astra lane. Full rules: `skills/codex/SKILL.md` → "Limit economy".
 
 ## Requirements
 
