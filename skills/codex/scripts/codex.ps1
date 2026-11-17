@@ -90,7 +90,12 @@ function Get-CodexLimit {
     }
   }
   if (-not $best) { return $null }
-  [pscustomobject]@{ FiveHour = [double]$best.primary.used_percent; Weekly = [double]$best.secondary.used_percent
+  # Kayıt sıfırlanmadan önce yazılmışsa (sonra hiç Codex çağrısı yoksa) değer bayattır: sıfırlanma zamanı geçen pencere %0.
+  $nowUnix = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  $five = [double]$best.primary.used_percent; $week = [double]$best.secondary.used_percent
+  if ($best.primary.resets_at -and [long]$best.primary.resets_at -le $nowUnix) { $five = 0 }
+  if ($best.secondary.resets_at -and [long]$best.secondary.resets_at -le $nowUnix) { $week = 0 }
+  [pscustomobject]@{ FiveHour = $five; Weekly = $week
                      Plan = $best.plan_type; At = $bestTs.ToString('o') }
 }
 function Write-Ledger([hashtable]$rec) {

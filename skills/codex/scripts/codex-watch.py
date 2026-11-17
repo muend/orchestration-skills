@@ -54,6 +54,9 @@ for f in files:
     for s in (steps[-a.n:] if a.n and not a.limit else []): print('   ' + s.replace('\n', ' ')[:170])
 
 if latest[1]:
-    r = latest[1]; pr, se = r.get('primary') or {}, r.get('secondary') or {}
-    fmt = lambda t: datetime.datetime.fromtimestamp(t).strftime('%d %b %H:%M') if t else '?'
+    r = latest[1]; pr, se = dict(r.get('primary') or {}), dict(r.get('secondary') or {})
+    now = datetime.datetime.now().timestamp()
+    for w in (pr, se):  # sıfırlanma zamanı geçmişse kayıt bayattır: pencere %0
+        if w.get('resets_at') and w['resets_at'] <= now: w['used_percent'] = 0.0; w['resets_at'] = None
+    fmt = lambda t: datetime.datetime.fromtimestamp(t).strftime('%d %b %H:%M') if t else 'sıfırlandı'
     print(f"\nLİMİT ({r.get('plan_type')}): 5 saatlik %{pr.get('used_percent')} (sıfırlanma {fmt(pr.get('resets_at'))}) | haftalık %{se.get('used_percent')} (sıfırlanma {fmt(se.get('resets_at'))})")
